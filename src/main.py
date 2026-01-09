@@ -1,84 +1,98 @@
 from fastapi import FastAPI, HTTPException, Path
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from typing import Dict, Any, Optional
+from typing import Optional
 import re
 
 app = FastAPI(title="Widget API", version="1.0.0")
 
-# In-memory storage for widgets (in production, use a database)
-widgets_storage: Dict[str, Dict[str, Any]] = {}
-
-class WidgetConfig(BaseModel):
+# Pydantic models for validation
+class WidgetResponse(BaseModel):
     key: str
-    config: Dict[str, Any]
+    html: str
+    status: str
 
-def validate_widget_key(key: str) -> str:
+# In-memory storage for demo purposes
+widgets_db = {
+    "sample-widget": {
+        "html": """
+        <div style="border: 1px solid #ccc; padding: 10px; border-radius: 5px;">
+            <h3>Sample Widget</h3>
+            <p>This is a sample embeddable widget.</p>
+        </div>
+        """,
+        "status": "active"
+    },
+    "weather-widget": {
+        "html": """
+        <div style="background: linear-gradient(135deg, #74b9ff, #0984e3); color: white; padding: 15px; border-radius: 10px; font-family: Arial, sans-serif;">
+            <h3 style="margin: 0 0 10px 0;">Weather Widget</h3>
+            <p style="margin: 0;">Current: 22°C, Sunny</p>
+        </div>
+        """,
+        "status": "active"
+    }
+}
+
+def validate_widget_key(key: str) -> bool:
     """Validate widget key format"""
-    if not key:
-        raise HTTPException(status_code=400, detail="Widget key cannot be empty")
+    # Key should be alphanumeric with hyphens, 3-50 characters
+    pattern = r'^[a-zA-Z0-9-]{3,50}$'
+    return bool(re.match(pattern, key))
+
+@app.get("/widget/{key}", response_class=HTMLResponse)
+async def get_widget(
+    key: str = Path(..., description="Widget key identifier", min_length=3, max_length=50)
+):
+    """
+    Get embeddable widget by key
     
-    if len(key) > 100:
-        raise HTTPException(status_code=400, detail="Widget key too long (max 100 characters)")
+    Returns HTML content that can be embedded in other websites
+    """
     
-    # Allow alphanumeric, hyphens, underscores
-    if not re.match(r'^[a-zA-Z0-9_-]+$', key):
+    # Input validation
+    if not validate_widget_key(key):
         raise HTTPException(
             status_code=400, 
-            detail="Widget key can only contain alphanumeric characters, hyphens, and underscores"
+            detail="Invalid widget key format. Key must be 3-50 characters long and contain only letters, numbers, and hyphens."
         )
     
-    return key
-
-@app.get("/api/widgets/{key}")
-async def get_widget(
-    key: str = Path(..., description="Widget key", min_length=1, max_length=100)
-) -> Dict[str, Any]:
-    """
-    Get widget configuration by key
-    
-    Args:
-        key: The widget key to retrieve
-        
-    Returns:
-        Widget configuration
-        
-    Raises:
-        HTTPException: 400 for invalid key format, 404 if widget not found
-    """
-    try:
-        # Validate key format
-        validated_key = validate_widget_key(key)
-        
-        # Check if widget exists
-        if validated_key not in widgets_storage:
-            raise HTTPException(
-                status_code=404, 
-                detail=f"Widget with key '{validated_key}' not found"
-            )
-        
-        return widgets_storage[validated_key]
-        
-    except HTTPException:
-        # Re-raise HTTP exceptions
-        raise
-    except Exception as e:
-        # Handle unexpected errors
+    # Check if widget exists
+    if key not in widgets_db:
         raise HTTPException(
-            status_code=500, 
-            detail="Internal server error occurred while retrieving widget"
+            status_code=404,
+            detail=f"Widget with key '{key}' not found"
         )
+    
+    widget = widgets_db[key]
+    
+    # Check if widget is active
+    if widget.get("status") != "active":
+        raise HTTPException(
+            status_code=410,
+            detail=f"Widget '{key}' is not available"
+        )
+    
+    # Return HTML content
+    return HTMLResponse(
+        content=widget["html"],
+        headers={
+            "Content-Type": "text/html; charset=utf-8",
+            "Cache-Control": "public, max-age=300",  # Cache for 5 minutes
+            "X-Frame-Options": "ALLOWALL",  # Allow embedding in iframes
+            "Access-Control-Allow-Origin": "*"  # Allow cross-origin requests
+        }
+    )
 
-@app.post("/api/widgets")
-async def create_widget(widget: WidgetConfig) -> Dict[str, str]:
-    """Create a new widget (helper endpoint for testing)"""
-    validated_key = validate_widget_key(widget.key)
-    widgets_storage[validated_key] = widget.config
-    return {"message": f"Widget '{validated_key}' created successfully"}
+@app.get("/")
+async def root():
+    """Root endpoint"""
+    return {"message": "Widget API is running"}
 
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy"}
+    return {"status": "healthy", "widgets_count": len(widgets_db)}
 
 if __name__ == "__main__":
     import uvicorn
