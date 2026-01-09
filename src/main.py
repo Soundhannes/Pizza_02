@@ -1,39 +1,85 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Path
 from pydantic import BaseModel
-from typing import List, Optional
-import uuid
+from typing import Dict, Any, Optional
+import re
 
-app = FastAPI(title="Recipe API", version="1.0.0")
+app = FastAPI(title="Widget API", version="1.0.0")
 
-# In-memory storage for recipes
-recipes_db = {}
+# In-memory storage for widgets (in production, use a database)
+widgets_storage: Dict[str, Dict[str, Any]] = {}
 
-class Recipe(BaseModel):
-    id: Optional[str] = None
-    name: str
-    ingredients: List[str]
-    instructions: str
-    prep_time: int
-    cook_time: int
+class WidgetConfig(BaseModel):
+    key: str
+    config: Dict[str, Any]
 
-@app.delete("/api/recipes/{recipe_id}")
-async def delete_recipe(recipe_id: str):
+def validate_widget_key(key: str) -> str:
+    """Validate widget key format"""
+    if not key:
+        raise HTTPException(status_code=400, detail="Widget key cannot be empty")
+    
+    if len(key) > 100:
+        raise HTTPException(status_code=400, detail="Widget key too long (max 100 characters)")
+    
+    # Allow alphanumeric, hyphens, underscores
+    if not re.match(r'^[a-zA-Z0-9_-]+$', key):
+        raise HTTPException(
+            status_code=400, 
+            detail="Widget key can only contain alphanumeric characters, hyphens, and underscores"
+        )
+    
+    return key
+
+@app.get("/api/widgets/{key}")
+async def get_widget(
+    key: str = Path(..., description="Widget key", min_length=1, max_length=100)
+) -> Dict[str, Any]:
     """
-    Delete a recipe by ID
+    Get widget configuration by key
+    
+    Args:
+        key: The widget key to retrieve
+        
+    Returns:
+        Widget configuration
+        
+    Raises:
+        HTTPException: 400 for invalid key format, 404 if widget not found
     """
-    # Input validation - check if ID is provided and not empty
-    if not recipe_id or not recipe_id.strip():
-        raise HTTPException(status_code=400, detail="Recipe ID cannot be empty")
-    
-    # Check if recipe exists
-    if recipe_id not in recipes_db:
-        raise HTTPException(status_code=404, detail="Recipe not found")
-    
-    # Delete the recipe
-    deleted_recipe = recipes_db.pop(recipe_id)
-    
-    return {"message": "Recipe deleted successfully", "deleted_recipe_id": recipe_id}
+    try:
+        # Validate key format
+        validated_key = validate_widget_key(key)
+        
+        # Check if widget exists
+        if validated_key not in widgets_storage:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Widget with key '{validated_key}' not found"
+            )
+        
+        return widgets_storage[validated_key]
+        
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
+    except Exception as e:
+        # Handle unexpected errors
+        raise HTTPException(
+            status_code=500, 
+            detail="Internal server error occurred while retrieving widget"
+        )
 
-@app.get("/")
-async def root():
-    return {"message": "Recipe API is running"}
+@app.post("/api/widgets")
+async def create_widget(widget: WidgetConfig) -> Dict[str, str]:
+    """Create a new widget (helper endpoint for testing)"""
+    validated_key = validate_widget_key(widget.key)
+    widgets_storage[validated_key] = widget.config
+    return {"message": f"Widget '{validated_key}' created successfully"}
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
