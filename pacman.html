@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pacman</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background-color: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        canvas {
+            border: 2px solid #00f;
+            background-color: #000;
+        }
+        #score {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+        #controls {
+            margin-top: 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div id="score">Score: 0</div>
+    <canvas id="gameCanvas" width="600" height="600"></canvas>
+    <div id="controls">
+        <p>Verwende die Pfeiltasten um Pacman zu steuern</p>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreElement = document.getElementById('score');
+
+        const CELL_SIZE = 30;
+        const ROWS = 20;
+        const COLS = 20;
+
+        // Labyrinth Layout (1 = Wand, 0 = Weg, 2 = Punkt)
+        const maze = [
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1],
+            [1,2,2,2,2,2,2,2,2,1,1,2,2,2,2,2,2,2,2,1],
+            [1,2,1,1,2,1,1,1,2,1,1,2,1,1,1,2,1,1,2,1],
+            [1,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1],
+            [1,2,1,1,2,1,2,1,1,1,1,1,1,2,1,2,1,1,2,1],
+            [1,2,2,2,2,1,2,2,2,1,1,2,2,2,1,2,2,2,2,1],
+            [1,1,1,1,2,1,1,1,0,1,1,0,1,1,1,2,1,1,1,1],
+            [1,1,1,1,2,1,0,0,0,0,0,0,0,0,1,2,1,1,1,1],
+            [1,1,1,1,2,1,0,1,1,0,0,1,1,0,1,2,1,1,1,1],
+            [0,0,0,0,2,0,0,1,0,0,0,0,1,0,0,2,0,0,0,0],
+            [1,1,1,1,2,1,0,1,1,1,1,1,1,0,1,2,1,1,1,1],
+            [1,1,1,1,2,1,0,0,0,0,0,0,0,0,1,2,1,1,1,1],
+            [1,1,1,1,2,1,1,1,0,1,1,0,1,1,1,2,1,1,1,1],
+            [1,2,2,2,2,2,2,2,2,1,1,2,2,2,2,2,2,2,2,1],
+            [1,2,1,1,2,1,1,1,2,1,1,2,1,1,1,2,1,1,2,1],
+            [1,2,2,1,2,2,2,2,2,2,2,2,2,2,2,2,1,2,2,1],
+            [1,1,2,1,2,1,2,1,1,1,1,1,1,2,1,2,1,2,1,1],
+            [1,2,2,2,2,1,2,2,2,1,1,2,2,2,1,2,2,2,2,1],
+            [1,2,1,1,1,1,1,1,2,1,1,2,1,1,1,1,1,1,2,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+        ];
+
+        // Pacman Objekt
+        const pacman = {
+            x: 1,
+            y: 1,
+            direction: 'right'
+        };
+
+        let score = 0;
+        let totalDots = 0;
+
+        // Zähle die Punkte im Labyrinth
+        function countDots() {
+            totalDots = 0;
+            for (let row = 0; row < ROWS; row++) {
+                for (let col = 0; col < COLS; col++) {
+                    if (maze[row][col] === 2) {
+                        totalDots++;
+                    }
+                }
+            }
+        }
+
+        // Zeichne das Labyrinth
+        function drawMaze() {
+            for (let row = 0; row < ROWS; row++) {
+                for (let col = 0; col < COLS; col++) {
+                    const x = col * CELL_SIZE;
+                    const y = row * CELL_SIZE;
+                    
+                    if (maze[row][col] === 1) {
+                        // Wand
+                        ctx.fillStyle = '#00f';
+                        ctx.fillRect(x, y, CELL_SIZE, CELL_SIZE);
+                    } else if (maze[row][col] === 2) {
+                        // Punkt
+                        ctx.fillStyle = '#fff';
+                        ctx.beginPath();
+                        ctx.arc(x + CELL_SIZE/2, y + CELL_SIZE/2, 3, 0, 2 * Math.PI);
+                        ctx.fill();
+                    }
+                }
+            }
+        }
+
+        // Zeichne Pacman
+        function drawPacman() {
+            const x = pacman.x * CELL_SIZE + CELL_SIZE/2;
+            const y = pacman.y * CELL_SIZE + CELL_SIZE/2;
+            const radius = CELL_SIZE/2 - 2;
+            
+            ctx.fillStyle = '#ff0';
+            ctx.beginPath();
+            
+            // Bestimme den Mundwinkel basierend auf der Richtung
+            let startAngle, endAngle;
+            switch(pacman.direction) {
+                case 'right':
+                    startAngle = 0.2 * Math.PI;
+                    endAngle = 1.8 * Math.PI;
+                    break;
+                case 'left':
+                    startAngle = 1.2 * Math.PI;
+                    endAngle = 0.8 * Math.PI;
+                    break;
+                case 'up':
+                    startAngle = 1.7 * Math.PI;
+                    endAngle = 1.3 * Math.PI;
+                    break;
+                case 'down':
+                    startAngle = 0.7 * Math.PI;
+                    endAngle = 0.3 * Math.PI;
+                    break;
+            }
+            
+            ctx.arc(x, y, radius, startAngle, endAngle);
+            ctx.lineTo(x, y);
+            ctx.fill();
+        }
+
+        // Bewege Pacman
+        function movePacman(direction) {
+            let newX = pacman.x;
+            let newY = pacman.y;
+            
+            switch(direction) {
+                case 'up':
+                    newY--;
+                    break;
+                case 'down':
+                    newY++;
+                    break;
+                case 'left':
+                    newX--;
+                    break;
+                case 'right':
+                    newX++;
+                    break;
+            }
+            
+            // Tunnel-Effekt an den Seiten
+            if (newX < 0) newX = COLS - 1;
+            if (newX >= COLS) newX = 0;
+            if (newY < 0) newY = ROWS - 1;
+            if (newY >= ROWS) newY = 0;
+            
+            // Prüfe ob die neue Position gültig ist (keine Wand)
+            if (maze[newY][newX] !== 1) {
+                pacman.x = newX;
+                pacman.y = newY;
+                pacman.direction = direction;
+                
+                // Sammle Punkt
+                if (maze[newY][newX] === 2) {
+                    maze[newY][newX] = 0;
+                    score += 10;
+                    updateScore();
+                    
+                    // Prüfe ob alle Punkte gesammelt wurden
+                    if (score === totalDots * 10) {
+                        alert('Glückwunsch! Du hast alle Punkte gesammelt!');
+                        resetGame();
+                    }
+                }
+            }
+        }
+
+        // Aktualisiere Score-Anzeige
+        function updateScore() {
+            scoreElement.textContent = `Score: ${score}`;
+        }
+
+        // Spiel zurücksetzen
+        function resetGame() {
+            pacman.x = 1;
+            pacman.y = 1;
+            pacman.direction = 'right';
+            score = 0;
+            
+            // Setze alle Punkte zurück
+            for (let row = 0; row < ROWS; row++) {
+                for (let col = 0; col < COLS; col++) {
+                    if (maze[row][col] === 0 && 
+                        !(row >= 6 && row <= 12 && col >= 6 && col <= 13)) {
+                        maze[row][col] = 2;
+                    }
+                }
+            }
+            
+            countDots();
+            updateScore();
+        }
+
+        // Hauptspiel-Loop
+        function gameLoop() {
+            // Lösche Canvas
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            // Zeichne alles
+            drawMaze();
+            drawPacman();
+            
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Tastatur-Event-Listener
+        document.addEventListener('keydown', function(event) {
+            switch(event.key) {
+                case 'ArrowUp':
+                    event.preventDefault();
+                    movePacman('up');
+                    break;
+                case 'ArrowDown':
+                    event.preventDefault();
+                    movePacman('down');
+                    break;
+                case 'ArrowLeft':
+                    event.preventDefault();
+                    movePacman('left');
+                    break;
+                case 'ArrowRight':
+                    event.preventDefault();
+                    movePacman('right');
+                    break;
+            }
+        });
+
+        // Spiel initialisieren
+        countDots();
+        updateScore();
+        gameLoop();
+    </script>
+</body>
+</html>

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matrix Code Rain</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #000;
+            overflow: hidden;
+            font-family: 'Courier New', monospace;
+        }
+        
+        canvas {
+            display: block;
+            background-color: #000;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="matrix"></canvas>
+    
+    <script>
+        const canvas = document.getElementById('matrix');
+        const ctx = canvas.getContext('2d');
+        
+        // Canvas auf Vollbild setzen
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+        
+        // Matrix Zeichen (Katakana, Hiragana, ASCII)
+        const matrixChars = 'アァカサタナハマヤャラワガザダバパイィキシチニヒミリヰギジヂビピウゥクスツヌフムユュルグズブヅプエェケセテネヘメレヱゲゼデベペオォコソトノホモヨョロヲゴゾドボポヴッン0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        
+        const fontSize = 16;
+        const columns = canvas.width / fontSize;
+        
+        // Array für die Y-Position jeder Spalte
+        const drops = [];
+        
+        // Initialisiere drops Array
+        for (let x = 0; x < columns; x++) {
+            drops[x] = Math.random() * canvas.height / fontSize;
+        }
+        
+        function draw() {
+            // Schwarzer Hintergrund mit Transparenz für Fade-Effekt
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.04)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = '#0F0'; // Grüne Farbe
+            ctx.font = fontSize + 'px monospace';
+            
+            // Zeichne für jede Spalte
+            for (let i = 0; i < drops.length; i++) {
+                // Zufälliges Zeichen auswählen
+                const text = matrixChars.charAt(Math.floor(Math.random() * matrixChars.length));
+                
+                // Zeichen zeichnen
+                ctx.fillStyle = '#0F0';
+                ctx.fillText(text, i * fontSize, drops[i] * fontSize);
+                
+                // Helleres Grün für den ersten Buchstaben (Kopf der Spalte)
+                if (drops[i] * fontSize > canvas.height && Math.random() > 0.975) {
+                    drops[i] = 0;
+                }
+                
+                // Y-Position erhöhen (verschiedene Geschwindigkeiten)
+                drops[i] += Math.random() * 0.5 + 0.5;
+            }
+        }
+        
+        // Animation starten
+        setInterval(draw, 35);
+        
+        // Canvas bei Fenstergrößenänderung anpassen
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            
+            const newColumns = canvas.width / fontSize;
+            drops.length = 0;
+            
+            for (let x = 0; x < newColumns; x++) {
+                drops[x] = Math.random() * canvas.height / fontSize;
+            }
+        });
+    </script>
+</body>
+</html>
