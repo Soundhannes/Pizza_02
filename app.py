@@ -1,120 +1,126 @@
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify, request
+from flask_cors import CORS
+import os
+import json
 from datetime import datetime
-import uuid
 
 app = Flask(__name__)
+CORS(app)
 
-# In-memory storage for recipes
-recipes = []
+# Konfiguration
+RECIPES_DIR = 'data/recipes'
 
-def validate_recipe_data(data):
-    """Validate recipe input data"""
-    errors = []
-    
-    if not data:
-        errors.append("Request body is required")
-        return errors
-    
-    # Required fields
-    required_fields = ['name', 'ingredients', 'instructions']
-    for field in required_fields:
-        if field not in data:
-            errors.append(f"Field '{field}' is required")
-        elif not data[field] or (isinstance(data[field], str) and not data[field].strip()):
-            errors.append(f"Field '{field}' cannot be empty")
-    
-    # Validate ingredients
-    if 'ingredients' in data:
-        if not isinstance(data['ingredients'], list):
-            errors.append("Field 'ingredients' must be a list")
-        elif len(data['ingredients']) == 0:
-            errors.append("At least one ingredient is required")
-        else:
-            for i, ingredient in enumerate(data['ingredients']):
-                if not isinstance(ingredient, str) or not ingredient.strip():
-                    errors.append(f"Ingredient at index {i} must be a non-empty string")
-    
-    # Validate instructions
-    if 'instructions' in data:
-        if not isinstance(data['instructions'], list):
-            errors.append("Field 'instructions' must be a list")
-        elif len(data['instructions']) == 0:
-            errors.append("At least one instruction is required")
-        else:
-            for i, instruction in enumerate(data['instructions']):
-                if not isinstance(instruction, str) or not instruction.strip():
-                    errors.append(f"Instruction at index {i} must be a non-empty string")
-    
-    # Validate name
-    if 'name' in data and isinstance(data['name'], str):
-        if len(data['name'].strip()) > 200:
-            errors.append("Recipe name cannot exceed 200 characters")
-    
-    # Validate optional fields
-    if 'prep_time' in data:
-        if not isinstance(data['prep_time'], int) or data['prep_time'] < 0:
-            errors.append("Field 'prep_time' must be a non-negative integer")
-    
-    if 'cook_time' in data:
-        if not isinstance(data['cook_time'], int) or data['cook_time'] < 0:
-            errors.append("Field 'cook_time' must be a non-negative integer")
-    
-    if 'servings' in data:
-        if not isinstance(data['servings'], int) or data['servings'] <= 0:
-            errors.append("Field 'servings' must be a positive integer")
-    
-    return errors
+def ensure_recipes_dir():
+    """Stellt sicher, dass das Rezepte-Verzeichnis existiert"""
+    if not os.path.exists(RECIPES_DIR):
+        os.makedirs(RECIPES_DIR)
 
-@app.route('/api/recipes', methods=['POST'])
-def create_recipe():
-    """Create a new recipe"""
+def load_recipe(filename):
+    """Lädt ein einzelnes Rezept aus einer Datei"""
     try:
-        # Check content type
-        if not request.is_json:
+        filepath = os.path.join(RECIPES_DIR, filename)
+        with open(filepath, 'r', encoding='utf-8') as f:
+            recipe = json.load(f)
+            # Füge die ID basierend auf dem Dateinamen hinzu
+            recipe['id'] = filename.replace('.json', '')
+            return recipe
+    except (json.JSONDecodeError, FileNotFoundError, KeyError):
+        return None
+
+@app.route('/api/recipes', methods=['GET'])
+def get_recipes():
+    """
+    GET /api/recipes - Lädt gespeicherte Rezepte
+    
+    Query Parameter:
+    - limit: Maximale Anzahl der Rezepte (optional, Standard: alle)
+    - offset: Anzahl der zu überspringenden Rezepte (optional, Standard: 0)
+    """
+    try:
+        # Input validation
+        limit = request.args.get('limit', type=int)
+        offset = request.args.get('offset', type=int, default=0)
+        
+        # Validierung der Parameter
+        if limit is not None and limit < 0:
             return jsonify({
-                'error': 'Content-Type must be application/json'
+                'error': 'Invalid limit parameter',
+                'message': 'Limit must be a non-negative integer'
+            }), 400
+            
+        if offset < 0:
+            return jsonify({
+                'error': 'Invalid offset parameter',
+                'message': 'Offset must be a non-negative integer'
             }), 400
         
-        data = request.get_json()
+        # Stelle sicher, dass das Verzeichnis existiert
+        ensure_recipes_dir()
         
-        # Validate input data
-        validation_errors = validate_recipe_data(data)
-        if validation_errors:
+        # Lade alle Rezepte
+        recipes = []
+        
+        try:
+            recipe_files = [f for f in os.listdir(RECIPES_DIR) if f.endswith('.json')]
+        except OSError:
+            # Verzeichnis existiert nicht oder ist nicht lesbar
             return jsonify({
-                'error': 'Validation failed',
-                'details': validation_errors
+                'recipes': [],
+                'total': 0,
+                'offset': offset,
+                'limit': limit
+            })
+        
+        # Sortiere Dateien für konsistente Reihenfolge
+        recipe_files.sort()
+        
+        for filename in recipe_files:
+            recipe = load_recipe(filename)
+            if recipe is not None:
+                recipes.append(recipe)
+        
+        # Anwenden von offset und limit
+        total_recipes = len(recipes)
+        
+        if offset >= total_recipes and total_recipes > 0:
+            return jsonify({
+                'error': 'Invalid offset parameter',
+                'message': f'Offset {offset} is greater than total recipes {total_recipes}'
             }), 400
         
-        # Create new recipe
-        recipe = {
-            'id': str(uuid.uuid4()),
-            'name': data['name'].strip(),
-            'ingredients': [ingredient.strip() for ingredient in data['ingredients']],
-            'instructions': [instruction.strip() for instruction in data['instructions']],
-            'prep_time': data.get('prep_time'),
-            'cook_time': data.get('cook_time'),
-            'servings': data.get('servings'),
-            'created_at': datetime.utcnow().isoformat()
-        }
+        # Slice für Pagination
+        start_index = offset
+        end_index = start_index + limit if limit is not None else len(recipes)
+        paginated_recipes = recipes[start_index:end_index]
         
-        # Store recipe
-        recipes.append(recipe)
-        
-        return jsonify(recipe), 201
+        return jsonify({
+            'recipes': paginated_recipes,
+            'total': total_recipes,
+            'offset': offset,
+            'limit': limit,
+            'count': len(paginated_recipes)
+        })
         
     except Exception as e:
+        # Allgemeine Fehlerbehandlung
         return jsonify({
             'error': 'Internal server error',
-            'message': str(e)
+            'message': 'An unexpected error occurred while loading recipes'
         }), 500
 
-@app.errorhandler(400)
-def bad_request(error):
-    return jsonify({'error': 'Bad request'}), 400
+@app.errorhandler(404)
+def not_found(error):
+    return jsonify({
+        'error': 'Not found',
+        'message': 'The requested resource was not found'
+    }), 404
 
 @app.errorhandler(500)
 def internal_error(error):
-    return jsonify({'error': 'Internal server error'}), 500
+    return jsonify({
+        'error': 'Internal server error',
+        'message': 'An unexpected error occurred'
+    }), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)
