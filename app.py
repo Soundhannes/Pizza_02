@@ -1,126 +1,82 @@
-from flask import Flask, jsonify, request
-from flask_cors import CORS
-import os
-import json
+from flask import Flask, request, jsonify
+from marshmallow import Schema, fields, ValidationError
+import uuid
 from datetime import datetime
 
 app = Flask(__name__)
-CORS(app)
 
-# Konfiguration
-RECIPES_DIR = 'data/recipes'
+# In-memory storage for widgets (in production, use a database)
+widgets = {}
 
-def ensure_recipes_dir():
-    """Stellt sicher, dass das Rezepte-Verzeichnis existiert"""
-    if not os.path.exists(RECIPES_DIR):
-        os.makedirs(RECIPES_DIR)
+class WidgetSchema(Schema):
+    name = fields.Str(required=True, validate=lambda x: len(x.strip()) > 0)
+    type = fields.Str(required=True, validate=lambda x: x in ['chart', 'table', 'metric', 'text'])
+    config = fields.Dict(required=True)
+    position = fields.Dict(required=False, missing={})
+    enabled = fields.Bool(required=False, missing=True)
 
-def load_recipe(filename):
-    """Lädt ein einzelnes Rezept aus einer Datei"""
+widget_schema = WidgetSchema()
+
+@app.route('/api/widgets', methods=['POST'])
+def create_widget():
     try:
-        filepath = os.path.join(RECIPES_DIR, filename)
-        with open(filepath, 'r', encoding='utf-8') as f:
-            recipe = json.load(f)
-            # Füge die ID basierend auf dem Dateinamen hinzu
-            recipe['id'] = filename.replace('.json', '')
-            return recipe
-    except (json.JSONDecodeError, FileNotFoundError, KeyError):
-        return None
-
-@app.route('/api/recipes', methods=['GET'])
-def get_recipes():
-    """
-    GET /api/recipes - Lädt gespeicherte Rezepte
-    
-    Query Parameter:
-    - limit: Maximale Anzahl der Rezepte (optional, Standard: alle)
-    - offset: Anzahl der zu überspringenden Rezepte (optional, Standard: 0)
-    """
-    try:
-        # Input validation
-        limit = request.args.get('limit', type=int)
-        offset = request.args.get('offset', type=int, default=0)
-        
-        # Validierung der Parameter
-        if limit is not None and limit < 0:
+        # Validate JSON content type
+        if not request.is_json:
             return jsonify({
-                'error': 'Invalid limit parameter',
-                'message': 'Limit must be a non-negative integer'
-            }), 400
-            
-        if offset < 0:
-            return jsonify({
-                'error': 'Invalid offset parameter',
-                'message': 'Offset must be a non-negative integer'
+                'error': 'Content-Type must be application/json'
             }), 400
         
-        # Stelle sicher, dass das Verzeichnis existiert
-        ensure_recipes_dir()
+        # Get JSON data
+        json_data = request.get_json()
         
-        # Lade alle Rezepte
-        recipes = []
+        if json_data is None:
+            return jsonify({
+                'error': 'Invalid JSON data'
+            }), 400
         
+        # Validate input data
         try:
-            recipe_files = [f for f in os.listdir(RECIPES_DIR) if f.endswith('.json')]
-        except OSError:
-            # Verzeichnis existiert nicht oder ist nicht lesbar
+            validated_data = widget_schema.load(json_data)
+        except ValidationError as err:
             return jsonify({
-                'recipes': [],
-                'total': 0,
-                'offset': offset,
-                'limit': limit
-            })
-        
-        # Sortiere Dateien für konsistente Reihenfolge
-        recipe_files.sort()
-        
-        for filename in recipe_files:
-            recipe = load_recipe(filename)
-            if recipe is not None:
-                recipes.append(recipe)
-        
-        # Anwenden von offset und limit
-        total_recipes = len(recipes)
-        
-        if offset >= total_recipes and total_recipes > 0:
-            return jsonify({
-                'error': 'Invalid offset parameter',
-                'message': f'Offset {offset} is greater than total recipes {total_recipes}'
+                'error': 'Validation failed',
+                'details': err.messages
             }), 400
         
-        # Slice für Pagination
-        start_index = offset
-        end_index = start_index + limit if limit is not None else len(recipes)
-        paginated_recipes = recipes[start_index:end_index]
+        # Generate unique ID and timestamps
+        widget_id = str(uuid.uuid4())
+        current_time = datetime.utcnow().isoformat()
         
-        return jsonify({
-            'recipes': paginated_recipes,
-            'total': total_recipes,
-            'offset': offset,
-            'limit': limit,
-            'count': len(paginated_recipes)
-        })
+        # Create widget object
+        widget = {
+            'id': widget_id,
+            'name': validated_data['name'].strip(),
+            'type': validated_data['type'],
+            'config': validated_data['config'],
+            'position': validated_data['position'],
+            'enabled': validated_data['enabled'],
+            'created_at': current_time,
+            'updated_at': current_time
+        }
+        
+        # Store widget
+        widgets[widget_id] = widget
+        
+        # Return created widget
+        return jsonify(widget), 201
         
     except Exception as e:
-        # Allgemeine Fehlerbehandlung
         return jsonify({
-            'error': 'Internal server error',
-            'message': 'An unexpected error occurred while loading recipes'
+            'error': 'Internal server error'
         }), 500
 
 @app.errorhandler(404)
 def not_found(error):
-    return jsonify({
-        'error': 'Not found',
-        'message': 'The requested resource was not found'
-    }), 404
+    return jsonify({'error': 'Not found'}), 404
 
-@app.errorhandler(500)
-def internal_error(error):
-    return jsonify({
-        'error': 'Internal server error',
-        'message': 'An unexpected error occurred'
-    }), 500
+@app.errorhandler(405)
+def method_not_allowed(error):
+    return jsonify({'error': 'Method not allowed'}), 405
 
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=True)
