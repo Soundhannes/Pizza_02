@@ -1,82 +1,89 @@
 from flask import Flask, request, jsonify
-from marshmallow import Schema, fields, ValidationError
-import uuid
-from datetime import datetime
+import logging
 
 app = Flask(__name__)
+logging.basicConfig(level=logging.INFO)
 
-# In-memory storage for widgets (in production, use a database)
-widgets = {}
-
-class WidgetSchema(Schema):
-    name = fields.Str(required=True, validate=lambda x: len(x.strip()) > 0)
-    type = fields.Str(required=True, validate=lambda x: x in ['chart', 'table', 'metric', 'text'])
-    config = fields.Dict(required=True)
-    position = fields.Dict(required=False, missing={})
-    enabled = fields.Bool(required=False, missing=True)
-
-widget_schema = WidgetSchema()
-
-@app.route('/api/widgets', methods=['POST'])
-def create_widget():
+@app.route('/api/sync', methods=['POST'])
+def sync_data():
+    """
+    Synchronisiert lokale Daten mit Cloud
+    """
     try:
-        # Validate JSON content type
+        # Input validation
         if not request.is_json:
             return jsonify({
                 'error': 'Content-Type must be application/json'
             }), 400
         
-        # Get JSON data
-        json_data = request.get_json()
+        data = request.get_json()
         
-        if json_data is None:
+        if data is None:
             return jsonify({
-                'error': 'Invalid JSON data'
+                'error': 'Invalid JSON payload'
             }), 400
         
-        # Validate input data
-        try:
-            validated_data = widget_schema.load(json_data)
-        except ValidationError as err:
+        # Validate required fields
+        if 'data' not in data:
             return jsonify({
-                'error': 'Validation failed',
-                'details': err.messages
+                'error': 'Missing required field: data'
             }), 400
         
-        # Generate unique ID and timestamps
-        widget_id = str(uuid.uuid4())
-        current_time = datetime.utcnow().isoformat()
+        if not isinstance(data['data'], list):
+            return jsonify({
+                'error': 'Field "data" must be an array'
+            }), 400
         
-        # Create widget object
-        widget = {
-            'id': widget_id,
-            'name': validated_data['name'].strip(),
-            'type': validated_data['type'],
-            'config': validated_data['config'],
-            'position': validated_data['position'],
-            'enabled': validated_data['enabled'],
-            'created_at': current_time,
-            'updated_at': current_time
-        }
+        # Edge case: empty data array
+        if len(data['data']) == 0:
+            return jsonify({
+                'message': 'No data to sync',
+                'synced_count': 0,
+                'status': 'success'
+            }), 200
         
-        # Store widget
-        widgets[widget_id] = widget
+        # Edge case: data array too large
+        if len(data['data']) > 1000:
+            return jsonify({
+                'error': 'Data array too large. Maximum 1000 items allowed'
+            }), 400
         
-        # Return created widget
-        return jsonify(widget), 201
+        # Validate each data item
+        for i, item in enumerate(data['data']):
+            if not isinstance(item, dict):
+                return jsonify({
+                    'error': f'Data item at index {i} must be an object'
+                }), 400
+            
+            if 'id' not in item:
+                return jsonify({
+                    'error': f'Data item at index {i} missing required field: id'
+                }), 400
         
-    except Exception as e:
+        # Simulate sync process
+        synced_count = len(data['data'])
+        
+        # Log sync operation
+        logging.info(f"Synced {synced_count} items to cloud")
+        
         return jsonify({
-            'error': 'Internal server error'
+            'message': 'Data synchronized successfully',
+            'synced_count': synced_count,
+            'status': 'success'
+        }), 200
+        
+    except ValueError as e:
+        # Handle JSON parsing errors
+        return jsonify({
+            'error': 'Invalid JSON format'
+        }), 400
+    
+    except Exception as e:
+        # Handle unexpected errors
+        logging.error(f"Sync error: {str(e)}")
+        return jsonify({
+            'error': 'Internal server error during sync'
         }), 500
-
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({'error': 'Not found'}), 404
-
-@app.errorhandler(405)
-def method_not_allowed(error):
-    return jsonify({'error': 'Method not allowed'}), 405
 
 if __name__ == '__main__':
     app.run(debug=True)
